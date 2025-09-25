@@ -1,0 +1,32 @@
+{
+  "_comment": "爬虫配置文件 - 平衡速度和稳定性，防止图片下载触发反爬",
+  "scraper_settings": {
+    "max_retries": 6,
+    "timeout": 18,
+    "delay_between_requests": [2, 5],
+    "delay_between_categories": [8, 15],
+    "delay_between_pages": [3, 8],
+    "max_image_download_workers": 1,
+    "image_download_timeout": 25,
+    "image_download_delay": [3, 8],
+    "random_sleep_probability": 0.2,
+    "long_random_sleep_range": [15, 45]
+  },
+  "user_agents": [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
+  ],
+  "output_settings": {
+    "excel_filename": "products.xlsx",
+    "images_folder": "images",
+    "create_category_sheets": true,
+    "save_debug_info": true
+  }
+}
