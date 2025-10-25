@@ -10,7 +10,9 @@
     "image_download_timeout": 25,
     "image_download_delay": [3, 8],
     "random_sleep_probability": 0.2,
-    "long_random_sleep_range": [15, 45]
+    "long_random_sleep_range": [15, 45],
+    "fetch_product_details": true,
+    "details_delay_range": [5, 10]
   },
   "user_agents": [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

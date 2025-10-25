@@ -111,7 +111,9 @@ class ProductScraper:
                 "image_download_timeout": 25,
                 "image_download_delay": [3, 8],
                 "random_sleep_probability": 0.2,
-                "long_random_sleep_range": [15, 45]
+                "long_random_sleep_range": [15, 45],
+                "fetch_product_details": False,  # 是否获取产品详情页面信息
+                "details_delay_range": [5, 10]  # 获取详情页面的延时范围
             },
             "user_agents": [
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -444,13 +446,31 @@ class ProductScraper:
                         price_container = price_container.find_parent()
                     else:
                         break
+                
+                # 获取产品详情信息（如果配置启用）
+                product_details = ""
+                banner_images = []
+                detail_images = []
+                if self.config['scraper_settings'].get('fetch_product_details', False):
+                    try:
+                        product_details, banner_images, detail_images = self.extract_product_details(product_url)
+                        if product_details:
+                            logger.debug(f"成功获取产品详情: {product_name[:30]}...")
+                        else:
+                            logger.debug(f"未获取到产品详情: {product_name[:30]}...")
+                    except Exception as detail_error:
+                        logger.warning(f"获取产品详情失败 {product_name}: {detail_error}")
+                
                 product_info = {
                     'category': category_name,
                     'name': product_name,
                     'url': product_url,
                     'image_url': img_url if img_url else "",
                     'price': price,
-                    'image_path': None
+                    'image_path': None,
+                    'details': product_details,
+                    'banner_images': banner_images,
+                    'detail_images': detail_images
                 }
                 products.append(product_info)
             except Exception as e:
@@ -458,10 +478,280 @@ class ProductScraper:
                 continue
         return products
     
-    def download_image(self, image_url: str, product_name: str, max_retries: int = 3) -> Optional[str]:
-        """下载产品图片"""
+    def html_to_markdown(self, html_content: str) -> str:
+        """将HTML内容转换为Markdown格式"""
+        if not html_content:
+            return ""
+            
+        try:
+            from bs4 import BeautifulSoup
+            import re
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            markdown_content = []
+            
+            def process_element(element, level=0):
+                """递归处理HTML元素"""
+                if element.name == 'table':
+                    # 处理表格
+                    rows = element.find_all('tr')
+                    if rows:
+                        table_content = []
+                        for i, row in enumerate(rows):
+                            cells = row.find_all(['td', 'th'])
+                            if cells:
+                                cell_contents = []
+                                for cell in cells:
+                                    cell_text = cell.get_text(strip=True)
+                                    # 清理特殊字符和编码问题
+                                    cell_text = re.sub(r'[^\w\s\-.,():/]+', '', cell_text)
+                                    cell_contents.append(cell_text if cell_text else ' ')
+                                
+                                if i == 0:  # 第一行作为表头
+                                    table_content.append('| ' + ' | '.join(cell_contents) + ' |')
+                                    table_content.append('|' + '---|' * len(cell_contents))
+                                else:
+                                    table_content.append('| ' + ' | '.join(cell_contents) + ' |')
+                        
+                        return '\n'.join(table_content) + '\n\n'
+                    
+                elif element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    # 处理标题
+                    level = int(element.name[1])
+                    text = element.get_text(strip=True)
+                    text = re.sub(r'[^\w\s\-.,():/]+', '', text)
+                    return '#' * level + ' ' + text + '\n\n'
+                    
+                elif element.name == 'p':
+                    # 处理段落
+                    text = element.get_text(strip=True)
+                    text = re.sub(r'[^\w\s\-.,():/\n]+', '', text)
+                    if text:
+                        return text + '\n\n'
+                        
+                elif element.name == 'br':
+                    return '\n'
+                    
+                elif element.name in ['strong', 'b']:
+                    text = element.get_text(strip=True)
+                    text = re.sub(r'[^\w\s\-.,():/]+', '', text)
+                    return f'**{text}**'
+                    
+                elif element.name in ['em', 'i']:
+                    text = element.get_text(strip=True)
+                    text = re.sub(r'[^\w\s\-.,():/]+', '', text)
+                    return f'*{text}*'
+                    
+                elif element.name == 'ul':
+                    # 处理无序列表
+                    items = element.find_all('li')
+                    list_content = []
+                    for item in items:
+                        item_text = item.get_text(strip=True)
+                        item_text = re.sub(r'[^\w\s\-.,():/]+', '', item_text)
+                        if item_text:
+                            list_content.append(f'- {item_text}')
+                    return '\n'.join(list_content) + '\n\n'
+                    
+                elif element.name == 'ol':
+                    # 处理有序列表
+                    items = element.find_all('li')
+                    list_content = []
+                    for i, item in enumerate(items, 1):
+                        item_text = item.get_text(strip=True)
+                        item_text = re.sub(r'[^\w\s\-.,():/]+', '', item_text)
+                        if item_text:
+                            list_content.append(f'{i}. {item_text}')
+                    return '\n'.join(list_content) + '\n\n'
+                    
+                return ""
+            
+            # 处理所有子元素
+            for element in soup.descendants:
+                if element.name:
+                    markdown_text = process_element(element)
+                    if markdown_text:
+                        markdown_content.append(markdown_text)
+            
+            # 合并内容并清理
+            final_content = ''.join(markdown_content)
+            
+            # 清理多余的空行
+            final_content = re.sub(r'\n{3,}', '\n\n', final_content)
+            
+            # 清理编码问题和特殊字符
+            final_content = re.sub(r'[^\w\s\-.,():/\n#*|]+', '', final_content)
+            
+            return final_content.strip()
+            
+        except Exception as e:
+            logger.warning(f"HTML转Markdown失败: {e}")
+            # fallback: 简单提取纯文本
+            soup = BeautifulSoup(html_content, 'html.parser')
+            text = soup.get_text(separator='\n', strip=True)
+            return re.sub(r'[^\w\s\-.,():/\n]+', '', text)
+    
+    def extract_banner_images(self, soup: BeautifulSoup) -> List[str]:
+        """从详情页提取 banner 图片"""
+        banner_images = []
+        
+        try:
+            # 查找 banner 容器
+            banner_container = soup.find('div', {'data-cnrole': 'ProductPhotoShowList'})
+            if not banner_container:
+                logger.debug("未找到 banner 容器")
+                return banner_images
+            
+            # 查找所有 li 元素
+            li_elements = banner_container.find_all('li')
+            for li in li_elements:
+                # 从 data-config 属性中提取图片 URL
+                data_config = li.get('data-config', '')
+                if data_config:
+                    # 使用正则提取 showing_image 的值
+                    match = re.search(r"showing_image:\s*'([^']+)'", data_config)
+                    if match:
+                        img_url = match.group(1)
+                        if self.validate_image_url(img_url):
+                            banner_images.append(img_url)
+                            logger.debug(f"找到 banner 图片: {img_url}")
+                
+                # 同时也从 img 标签获取 src
+                img = li.find('img')
+                if img:
+                    img_src = img.get('src')
+                    if img_src:
+                        img_url = urljoin(self.base_url, img_src)
+                        if self.validate_image_url(img_url) and img_url not in banner_images:
+                            banner_images.append(img_url)
+                            logger.debug(f"找到 banner 图片(img src): {img_url}")
+            
+            logger.info(f"共找到 {len(banner_images)} 张 banner 图片")
+            return banner_images
+            
+        except Exception as e:
+            logger.error(f"提取 banner 图片失败: {e}")
+            return banner_images
+    
+    def extract_detail_images(self, soup: BeautifulSoup) -> List[str]:
+        """从详情页提取介绍图片"""
+        detail_images = []
+        
+        try:
+            # 查找详情容器
+            detail_container = soup.find('div', class_='sp-bd pdsx')
+            if not detail_container:
+                logger.debug("未找到详情容器")
+                return detail_images
+            
+            # 查找所有图片
+            img_elements = detail_container.find_all('img')
+            for img in img_elements:
+                for attr in ['src', 'data-original', 'data-src', 'data-lazy']:
+                    img_url = img.get(attr)
+                    if img_url:
+                        img_url = urljoin(self.base_url, img_url)
+                        if self.validate_image_url(img_url) and img_url not in detail_images:
+                            detail_images.append(img_url)
+                            logger.debug(f"找到详情图片: {img_url}")
+                            break
+            
+            logger.info(f"共找到 {len(detail_images)} 张详情图片")
+            return detail_images
+            
+        except Exception as e:
+            logger.error(f"提取详情图片失败: {e}")
+            return detail_images
+    
+    def extract_product_details(self, product_url: str) -> Tuple[str, List[str], List[str]]:
+        """提取产品详情页面的详细信息、banner图片和详情图片
+        
+        Returns:
+            Tuple[str, List[str], List[str]]: (详情文本, banner图片列表, 详情图片列表)
+        """
+        try:
+            logger.info(f"正在获取产品详情: {product_url}")
+            
+            # 详情页面请求前延时
+            details_delay = self.config['scraper_settings'].get('details_delay_range', [5, 10])
+            self.smart_delay(details_delay, f"详情页面请求延时")
+            
+            # 获取产品详情页面
+            soup = self.get_page(product_url)
+            if not soup:
+                logger.warning(f"无法获取产品详情页面: {product_url}")
+                return "", [], []
+            
+            # 提取 banner 图片
+            banner_images = self.extract_banner_images(soup)
+            
+            # 提取详情图片
+            detail_images = self.extract_detail_images(soup)
+            
+            # 查找className为'sp-bd pdsx'的元素
+            detail_container = soup.find('div', class_='sp-bd pdsx')
+            if not detail_container:
+                logger.warning(f"未找到详情容器: {product_url}")
+                return "", banner_images, detail_images
+            
+            # 提取详细信息区域的内容
+            detail_content = ""
+            
+            # 1. 提取属性表格 (attr-list)
+            attr_list = detail_container.find('div', class_='attr-list')
+            if attr_list:
+                logger.debug("找到属性信息")
+                detail_content += "## 产品属性\n\n"
+                detail_content += self.html_to_markdown(str(attr_list)) + "\n"
+            
+            # 2. 提取详细描述 (text-detail)
+            text_detail = detail_container.find('div', class_='text-detail')
+            if text_detail:
+                logger.debug("找到详细描述")
+                detail_content += "## 产品详情\n\n"
+                
+                # 移除不需要的元素（如脚本、样式等）
+                for unwanted in text_detail.find_all(['script', 'style', 'noscript']):
+                    unwanted.decompose()
+                
+                # 转换为Markdown
+                detail_markdown = self.html_to_markdown(str(text_detail))
+                detail_content += detail_markdown + "\n"
+            
+            if not detail_content:
+                # 如果没有找到特定结构，尝试提取整个容器的内容
+                logger.debug("未找到标准结构，提取整个容器内容")
+                detail_content = "## 产品详情\n\n"
+                
+                # 移除不需要的元素
+                for unwanted in detail_container.find_all(['script', 'style', 'noscript']):
+                    unwanted.decompose()
+                    
+                detail_content += self.html_to_markdown(str(detail_container))
+            
+            logger.info(f"成功提取产品详情，长度: {len(detail_content)} 字符")
+            return detail_content.strip(), banner_images, detail_images
+            
+        except Exception as e:
+            logger.error(f"提取产品详情失败 {product_url}: {e}")
+            return "", [], []
+    def download_image(self, image_url: str, product_name: str, max_retries: int = 3, save_path: Path = None) -> Optional[str]:
+        """下载产品图片
+        
+        Args:
+            image_url: 图片URL
+            product_name: 产品名称
+            max_retries: 最大重试次数
+            save_path: 保存路径，如果为None则保存到默认的images目录
+            
+        Returns:
+            图片相对路径或None
+        """
         if not image_url:
             return None
+        
+        if save_path is None:
+            save_path = self.images_dir
             
         for attempt in range(max_retries):
             try:
@@ -504,7 +794,7 @@ class ProductScraper:
                     ext = '.jpg'
                 
                 filename = f"{safe_name}_{url_hash}{ext}"
-                filepath = self.images_dir / filename
+                filepath = save_path / filename
                 
                 # 保存图片
                 with open(filepath, 'wb') as f:
@@ -679,8 +969,99 @@ class ProductScraper:
             logger.warning("没有成功下载任何图片，可能触发了反爬机制")
             logger.warning("建议检查网络连接或降低爬取频率")
     
+    def download_product_images_to_folders(self):
+        """下载所有产品的图片到分类/产品名称文件夹中"""
+        logger.info("开始按照分类和产品名称下载所有图片...")
+        
+        total_products = len(self.products_data)
+        processed = 0
+        success_count = 0
+        
+        for product in self.products_data:
+            processed += 1
+            try:
+                category_name = product['category']
+                product_name = product['name']
+                
+                # 创建安全的文件夹名称
+                safe_category = re.sub(r'[^\w\s-]', '', category_name)[:100].strip()
+                safe_product = re.sub(r'[^\w\s-]', '', product_name)[:100].strip()
+                
+                # 创建文件夹路径：分类/产品名称
+                product_dir = self.output_dir / safe_category / safe_product
+                product_dir.mkdir(parents=True, exist_ok=True)
+                
+                logger.info(f"处理产品 {processed}/{total_products}: {category_name}/{product_name}")
+                
+                downloaded_images = []
+                
+                # 下载 banner 图片
+                banner_images = product.get('banner_images', [])
+                if banner_images:
+                    logger.info(f"  下载 {len(banner_images)} 张 banner 图片...")
+                    for idx, img_url in enumerate(banner_images, 1):
+                        try:
+                            img_path = self.download_image(
+                                img_url, 
+                                f"banner_{idx}", 
+                                save_path=product_dir
+                            )
+                            if img_path:
+                                downloaded_images.append(img_path)
+                                logger.debug(f"    Banner {idx} 下载成功")
+                        except Exception as e:
+                            logger.warning(f"    Banner {idx} 下载失败: {e}")
+                
+                # 下载详情图片
+                detail_images = product.get('detail_images', [])
+                if detail_images:
+                    logger.info(f"  下载 {len(detail_images)} 张详情图片...")
+                    for idx, img_url in enumerate(detail_images, 1):
+                        try:
+                            img_path = self.download_image(
+                                img_url, 
+                                f"detail_{idx}", 
+                                save_path=product_dir
+                            )
+                            if img_path:
+                                downloaded_images.append(img_path)
+                                logger.debug(f"    详情图片 {idx} 下载成功")
+                        except Exception as e:
+                            logger.warning(f"    详情图片 {idx} 下载失败: {e}")
+                
+                # 保存产品详情文本
+                details_text = product.get('details', '')
+                if details_text:
+                    details_file = product_dir / '产品详情.md'
+                    try:
+                        with open(details_file, 'w', encoding='utf-8') as f:
+                            f.write(f"# {product_name}\n\n")
+                            f.write(f"**分类**: {category_name}\n\n")
+                            f.write(f"**价格**: {product.get('price', '未标价')}\n\n")
+                            f.write(f"**详情页**: {product['url']}\n\n")
+                            f.write("---\n\n")
+                            f.write(details_text)
+                        logger.info(f"  产品详情已保存")
+                    except Exception as e:
+                        logger.warning(f"  保存产品详情失败: {e}")
+                
+                if downloaded_images:
+                    success_count += 1
+                    logger.info(f"  ✓ 成功下载 {len(downloaded_images)} 张图片")
+                else:
+                    logger.warning(f"  ✗ 未下载到任何图片")
+                
+            except Exception as e:
+                logger.error(f"处理产品失败 {product.get('name', 'Unknown')}: {e}")
+                continue
+        
+        logger.info(f"\n图片下载完成！")
+        logger.info(f"总产品数: {total_products}")
+        logger.info(f"成功下载图片的产品: {success_count}")
+        logger.info(f"保存位置: {self.output_dir}")
+    
     def save_to_excel(self, filename: str = None):
-        """保存数据到Excel文件"""
+        """保存数据到Excel文件 - 按照要求的格式输出"""
         if not self.products_data:
             logger.warning("没有数据可保存")
             return
@@ -692,22 +1073,24 @@ class ProductScraper:
         
         # 创建DataFrame
         df = pd.DataFrame(self.products_data)
-        # 保证image_url列存在且为字符串
-        if 'image_url' not in df.columns:
-            df['image_url'] = ""
-        df['image_url'] = df['image_url'].astype(str)
-        # 重新排序列，image_url放在image_path前
-        columns = ['category', 'name', 'price', 'url', 'image_url', 'image_path']
-        df = df[[col for col in columns if col in df.columns]]
+        
+        # 按照要求的字段重新组织：商品名称、商品分类、商品价格、商品详情页 URL
+        output_df = pd.DataFrame({
+            '商品名称': df['name'],
+            '商品分类': df['category'],
+            '商品价格': df['price'].fillna('未标价'),
+            '商品详情页URL': df['url']
+        })
         
         # 保存到Excel
         with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='产品列表', index=False)
+            # 主表：所有产品汇总
+            output_df.to_excel(writer, sheet_name='产品汇总', index=False)
             
             # 按分类创建工作表
             if self.config['output_settings']['create_category_sheets']:
-                for category in df['category'].unique():
-                    category_df = df[df['category'] == category]
+                for category in output_df['商品分类'].unique():
+                    category_df = output_df[output_df['商品分类'] == category]
                     # Excel工作表名限制：最长31字符，不能包含特殊字符
                     safe_sheet_name = re.sub(r'[\\/*?:\[\]]', '', category)[:31]
                     try:
@@ -718,14 +1101,10 @@ class ProductScraper:
         logger.info(f"数据已保存到: {filepath}")
         
         # 打印统计信息
-        logger.info(f"总产品数: {len(df)}")
+        logger.info(f"总产品数: {len(output_df)}")
         logger.info("分类统计:")
-        for category, count in df['category'].value_counts().items():
+        for category, count in output_df['商品分类'].value_counts().items():
             logger.info(f"  {category}: {count} 个产品")
-        
-        # 图片下载统计
-        has_images = df['image_path'].notna().sum()
-        logger.info(f"成功下载图片: {has_images}/{len(df)} 个产品")
     
     def save_debug_info(self):
         """保存调试信息"""
@@ -769,19 +1148,19 @@ def main():
         scraper.scrape_all()
         
         if scraper.products_data:
-            # 并行下载图片
-            scraper.download_images_parallel()
-            
-            # 保存到Excel
+            # 保存产品列表到Excel（按照要求的格式）
             scraper.save_to_excel()
+            
+            # 下载所有产品的 banner 和详情图片到分类/产品名称文件夹
+            scraper.download_product_images_to_folders()
             
             # 保存调试信息
             scraper.save_debug_info()
             
             print(f"\n=== 爬取完成 ===")
             print(f"共获取 {len(scraper.products_data)} 个产品")
-            print(f"数据保存在: {scraper.output_dir / scraper.config['output_settings']['excel_filename']}")
-            print(f"图片保存在: {scraper.images_dir}")
+            print(f"产品列表保存在: {scraper.output_dir / scraper.config['output_settings']['excel_filename']}")
+            print(f"图片和详情保存在: {scraper.output_dir} (按分类/产品名称组织)")
             if scraper.failed_categories:
                 print(f"失败的分类: {[cat['name'] for cat in scraper.failed_categories]}")
         else:

@@ -1,0 +1,39 @@
+一、在每个商品的详情页面中，左上角还有一个商品图片的 banner 需要把 banner 中的图片也爬取下来。
+banner 部分的 HTML 结构如下，image 为下面 ul->li->div->a->img 标签中的 src 属性值。详情页所有的介绍图片也爬取下来
+<div class="picTab fl-clr" data-cnrole="ProductPhotoShowList">
+<div class="outer-wrapper">
+<div class="inner-wrapper">
+<ul class="fl-clr">
+<li class="" data-config="{showing_image: 'https://img2.fr-trading.com/2/5_366_2275272_973_615.jpg.webp', target_url: 'https://www.gys.cn/pic/4922448520_0.html'}">
+<div class="vertical-img">
+<a href="javascript: void(0);">
+<img src="https://img2.fr-trading.com/1/5_366_2275272_973_615.jpg.webp" alt="FORMSPRAG超越离合器、FORMSPRAG离合器联轴器、FORMSPRAG止回离器" width="65">
+</a>
+</div>
+</li>
+<li class="current" data-config="{showing_image: 'https://img2.fr-trading.com/2/5_993_2273662_973_615.jpg.webp', target_url: 'https://www.gys.cn/pic/4922448520_1.html'}">
+<div class="vertical-img">
+<a href="javascript: void(0);">
+<img src="https://img2.fr-trading.com/1/5_993_2273662_973_615.jpg.webp" alt="FORMSPRAG超越离合器、FORMSPRAG离合器联轴器、FORMSPRAG止回离器" width="65">
+</a>
+</div>
+</li>
+<li class="" data-config="{showing_image: 'https://img2.fr-trading.com/2/5_808_2401758_500_500.jpg.webp', target_url: 'https://www.gys.cn/pic/4922448520_2.html'}">
+<div class="vertical-img">
+<a href="javascript: void(0);">
+<img src="https://img2.fr-trading.com/1/5_808_2401758_500_500.jpg.webp" alt="FORMSPRAG超越离合器、FORMSPRAG离合器联轴器、FORMSPRAG止回离器" width="65">
+</a>
+</div>
+</li>
+</ul>
+</div>
+</div>
+</div>
+
+二、重新组织下输出的内容，excel 中汇总所有的产品信息，每个产品占一行，包含以下字段：
+1. 商品名称
+2. 商品分类
+3. 商品价格
+4. 商品详情页 URL
+
+三、按照 分类名称-> 商品名称的方式创建文件夹，将详情页的所有banner图片和详情页介绍文字放到对应的文件夹下。
