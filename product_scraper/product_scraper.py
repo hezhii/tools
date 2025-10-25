@@ -22,6 +22,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 from urllib.parse import quote
+import argparse
 
 # 配置日志
 logging.basicConfig(
@@ -80,6 +81,7 @@ class ProductScraper:
         
         self.products_data = []
         self.failed_categories = []
+        self.failed_products = []  # 新增：记录失败的产品
         self.request_count = 0
         
         logger.info(f"配置加载完成 - 延时范围: 请求间{self.delay_requests}s, 分类间{self.delay_categories}s")
@@ -460,6 +462,9 @@ class ProductScraper:
                             logger.debug(f"未获取到产品详情: {product_name[:30]}...")
                     except Exception as detail_error:
                         logger.warning(f"获取产品详情失败 {product_name}: {detail_error}")
+                        # 记录失败
+                        self.record_failure('product', category_name, product_name, 
+                                          f"获取详情失败: {detail_error}", product_url)
                 
                 product_info = {
                     'category': category_name,
@@ -606,15 +611,15 @@ class ProductScraper:
             li_elements = banner_container.find_all('li')
             for li in li_elements:
                 # 从 data-config 属性中提取图片 URL
-                data_config = li.get('data-config', '')
-                if data_config:
-                    # 使用正则提取 showing_image 的值
-                    match = re.search(r"showing_image:\s*'([^']+)'", data_config)
-                    if match:
-                        img_url = match.group(1)
-                        if self.validate_image_url(img_url):
-                            banner_images.append(img_url)
-                            logger.debug(f"找到 banner 图片: {img_url}")
+                # data_config = li.get('data-config', '')
+                # if data_config:
+                #     # 使用正则提取 showing_image 的值
+                #     match = re.search(r"showing_image:\s*'([^']+)'", data_config)
+                #     if match:
+                #         img_url = match.group(1)
+                #         if self.validate_image_url(img_url):
+                #             banner_images.append(img_url)
+                #             logger.debug(f"找到 banner 图片: {img_url}")
                 
                 # 同时也从 img 标签获取 src
                 img = li.find('img')
@@ -685,8 +690,8 @@ class ProductScraper:
             # 提取 banner 图片
             banner_images = self.extract_banner_images(soup)
             
-            # 提取详情图片
-            detail_images = self.extract_detail_images(soup)
+            # 不再提取详情图片，只保留 banner 图片
+            detail_images = []
             
             # 查找className为'sp-bd pdsx'的元素
             detail_container = soup.find('div', class_='sp-bd pdsx')
@@ -872,17 +877,38 @@ class ProductScraper:
                 
             except Exception as e:
                 logger.error(f"爬取第 {page} 页时出错: {e}")
+                # 记录页面爬取失败
+                self.record_failure('page', category_name, f"第{page}页", str(e), page_url)
                 continue
         
         logger.info(f"分类 {category_name} 共找到 {len(category_products)} 个产品")
         return category_products
     
-    def scrape_all(self):
-        """爬取所有产品"""
+    def scrape_all(self, retry_failed_only: bool = False):
+        """爬取所有产品
+        
+        Args:
+            retry_failed_only: 如果为True，只重新爬取失败列表中的项目
+        """
         logger.info("开始爬取所有产品...")
         
-        # 获取分类列表
-        categories = self.get_categories()
+        categories = []
+        
+        if retry_failed_only:
+            # 只重新爬取失败列表中的分类
+            logger.info("重试模式：只爬取失败列表中的分类和产品")
+            failed_list = self.load_failed_list()
+            
+            failed_categories_data = failed_list.get('failed_categories', [])
+            if failed_categories_data:
+                logger.info(f"找到 {len(failed_categories_data)} 个失败的分类")
+                categories = failed_categories_data
+            else:
+                logger.warning("失败列表中没有分类需要重新爬取")
+                return
+        else:
+            # 获取所有分类列表
+            categories = self.get_categories()
         
         if not categories:
             logger.error("未找到任何产品分类")
@@ -899,7 +925,8 @@ class ProductScraper:
                     logger.info(f"成功获取 {len(products)} 个产品")
                 else:
                     logger.warning(f"分类 {category['name']} 未获取到产品")
-                    self.failed_categories.append(category)
+                    self.record_failure('category', category['name'], category['name'], 
+                                      "未获取到产品", category.get('url', ''))
                 
                 # 分类间延时
                 if i < len(categories):
@@ -907,7 +934,7 @@ class ProductScraper:
                 
             except Exception as e:
                 logger.error(f"处理分类 {category['name']} 时出错: {e}")
-                self.failed_categories.append(category)
+                self.record_failure('category', category['name'], category['name'], str(e), category.get('url', ''))
                 continue
         
         logger.info(f"爬取完成，共获取 {len(self.products_data)} 个产品")
@@ -1138,14 +1165,111 @@ class ProductScraper:
             json.dump(debug_info, f, ensure_ascii=False, indent=2)
         
         logger.info(f"调试信息已保存到: {debug_file}")
+    
+    def record_failure(self, item_type: str, category_name: str, item_name: str, error: str, url: str = ""):
+        """记录失败的项目
+        
+        Args:
+            item_type: 类型 ('category' 或 'product')
+            category_name: 分类名称
+            item_name: 项目名称
+            error: 错误信息
+            url: URL（可选）
+        """
+        from datetime import datetime
+        
+        failure_record = {
+            'type': item_type,
+            'category': category_name,
+            'name': item_name,
+            'url': url,
+            'error': str(error),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        if item_type == 'category':
+            self.failed_categories.append({'name': category_name, 'url': url})
+        elif item_type == 'product':
+            self.failed_products.append(failure_record)
+        
+        logger.warning(f"记录失败: {item_type} - {category_name}/{item_name}: {error}")
+    
+    def save_failed_list(self):
+        """保存失败列表到文件"""
+        failed_list = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'failed_categories': [
+                {
+                    'name': cat['name'],
+                    'url': cat.get('url', '')
+                } for cat in self.failed_categories
+            ],
+            'failed_products': self.failed_products,
+            'summary': {
+                'total_failed_categories': len(self.failed_categories),
+                'total_failed_products': len(self.failed_products)
+            }
+        }
+        
+        failed_file = self.output_dir / 'failed_list.json'
+        with open(failed_file, 'w', encoding='utf-8') as f:
+            json.dump(failed_list, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"失败列表已保存到: {failed_file}")
+        logger.info(f"  失败分类: {len(self.failed_categories)}")
+        logger.info(f"  失败产品: {len(self.failed_products)}")
+    
+    def load_failed_list(self) -> Dict:
+        """加载失败列表"""
+        failed_file = self.output_dir / 'failed_list.json'
+        if not failed_file.exists():
+            logger.info("未找到失败列表文件")
+            return {'failed_categories': [], 'failed_products': []}
+        
+        try:
+            with open(failed_file, 'r', encoding='utf-8') as f:
+                failed_list = json.load(f)
+                logger.info(f"加载失败列表: {len(failed_list.get('failed_categories', []))} 个分类, "
+                          f"{len(failed_list.get('failed_products', []))} 个产品")
+                return failed_list
+        except Exception as e:
+            logger.error(f"加载失败列表失败: {e}")
+            return {'failed_categories': [], 'failed_products': []}
 
 def main():
     """主函数"""
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(
+        description='工业产品网站爬虫 - 爬取 https://shwz888.gys.cn/supply/ 上的产品信息',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用示例:
+  python product_scraper.py                    # 爬取所有产品
+  python product_scraper.py --retry-failed     # 只重新爬取失败列表中的项目
+  python product_scraper.py --config custom_config.json  # 使用自定义配置文件
+        """
+    )
+    
+    parser.add_argument(
+        '--retry-failed',
+        action='store_true',
+        help='只重新爬取失败列表(failed_list.json)中的分类和产品'
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config.json',
+        help='配置文件路径 (默认: config.json)'
+    )
+    
+    args = parser.parse_args()
+    
     try:
-        scraper = ProductScraper()
+        scraper = ProductScraper(config_file=args.config)
         
-        # 爬取所有产品数据
-        scraper.scrape_all()
+        # 爬取所有产品数据（或只爬取失败的）
+        scraper.scrape_all(retry_failed_only=args.retry_failed)
         
         if scraper.products_data:
             # 保存产品列表到Excel（按照要求的格式）
@@ -1157,12 +1281,20 @@ def main():
             # 保存调试信息
             scraper.save_debug_info()
             
+            # 保存失败列表
+            if scraper.failed_categories or scraper.failed_products:
+                scraper.save_failed_list()
+            
             print(f"\n=== 爬取完成 ===")
             print(f"共获取 {len(scraper.products_data)} 个产品")
             print(f"产品列表保存在: {scraper.output_dir / scraper.config['output_settings']['excel_filename']}")
             print(f"图片和详情保存在: {scraper.output_dir} (按分类/产品名称组织)")
             if scraper.failed_categories:
-                print(f"失败的分类: {[cat['name'] for cat in scraper.failed_categories]}")
+                print(f"失败的分类数: {len(scraper.failed_categories)}")
+            if scraper.failed_products:
+                print(f"失败的产品数: {len(scraper.failed_products)}")
+                print(f"失败列表已保存到: {scraper.output_dir / 'failed_list.json'}")
+                print(f"提示：可以使用 --retry-failed 参数重新爬取失败的项目")
         else:
             print("未获取到任何产品数据")
             

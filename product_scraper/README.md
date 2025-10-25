@@ -5,8 +5,28 @@
 - 产品分类（9个主要分类）
 - 产品名称
 - 产品价格
-- 产品图片（自动下载到本地）
+- 产品 Banner 图片（自动下载到本地）
+- 产品详情信息（支持Markdown格式）
 - 产品详情链接
+
+## 最新改进 🎉
+
+### v2.0 更新 (2025-10-25)
+1. **移除详情页图片提取** - 只保留 Banner 图片，提高爬取效率
+2. **修复产品详情重复问题** - 优化 HTML 转 Markdown 算法，避免内容重复
+3. **失败记录和重试功能** - 自动记录失败项，支持重新爬取失败的分类和产品
+
+### 命令行使用
+```bash
+# 爬取所有产品（默认）
+python product_scraper.py
+
+# 只重新爬取失败的项目
+python product_scraper.py --retry-failed
+
+# 使用自定义配置文件
+python product_scraper.py --config custom_config.json
+```
 
 ## 项目结构
 ```
@@ -20,10 +40,16 @@ tools/                                  # 根目录
     ├── run_scraper.sh                 # Linux/macOS运行脚本
     ├── run_scraper.bat                # Windows运行脚本
     ├── README.md                      # 使用说明
+    ├── CHANGELOG.md                   # 更新日志
     ├── output/                        # 输出文件夹
     │   ├── products.xlsx              # Excel产品数据
-    │   ├── images/                    # 产品图片
-    │   └── debug_info.json            # 调试信息
+    │   ├── failed_list.json           # 失败项目列表（新增）
+    │   ├── debug_info.json            # 调试信息
+    │   └── 分类名称/                   # 按分类组织的产品文件夹
+    │       └── 产品名称/
+    │           ├── banner_1.jpg       # Banner图片
+    │           ├── banner_2.jpg
+    │           └── 产品详情.md         # 产品详情文本
     └── scraper.log                    # 运行日志
 ```
 
@@ -61,8 +87,36 @@ pip install -r requirements.txt
 # 进入项目目录
 cd product_scraper
 
-# 运行爬虫
+# 爬取所有产品
 python product_scraper.py
+
+# 重新爬取失败的项目
+python product_scraper.py --retry-failed
+```
+
+## 📋 失败重试功能
+
+### 失败记录
+爬虫会自动记录以下失败情况：
+- 分类爬取失败
+- 页面爬取失败
+- 产品详情获取失败
+
+失败信息保存在 `output/failed_list.json`，包含：
+- 失败类型（category/product/page）
+- 分类名称
+- 产品名称
+- 失败原因
+- 失败时间
+- URL
+
+### 重试失败项目
+```bash
+# 查看失败列表
+cat output/failed_list.json
+
+# 重新爬取失败的项目
+python product_scraper.py --retry-failed
 ```
 
 ## 🛡️ 强大的反反爬机制
