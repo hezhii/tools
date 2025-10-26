@@ -11,6 +11,13 @@
 
 ## 最新改进 🎉
 
+### v2.1 更新 (2025-10-26)
+**新增 Output 处理工具** 🆕
+- `process_output.py` - 批量处理 output 目录
+  - 自动将 WebP 图片转换为 JPG 格式
+  - 批量替换产品详情中的联系信息
+  - 详见 [PROCESS_OUTPUT_README.md](PROCESS_OUTPUT_README.md)
+
 ### v2.0 更新 (2025-10-25)
 1. **移除详情页图片提取** - 只保留 Banner 图片，提高爬取效率
 2. **修复产品详情重复问题** - 优化 HTML 转 Markdown 算法，避免内容重复
@@ -36,11 +43,15 @@ tools/                                  # 根目录
 ├── .gitignore                         # Git忽略文件（根目录）
 └── product_scraper/                   # 爬虫项目文件夹
     ├── product_scraper.py             # 爬虫脚本（增强反爬版本）
+    ├── process_output.py              # Output 处理工具（新增）
     ├── config.json                    # 爬虫配置文件
     ├── run_scraper.sh                 # Linux/macOS运行脚本
     ├── run_scraper.bat                # Windows运行脚本
+    ├── run_process.sh                 # Linux/macOS 处理脚本（新增）
+    ├── run_process.bat                # Windows 处理脚本（新增）
     ├── README.md                      # 使用说明
     ├── CHANGELOG.md                   # 更新日志
+    ├── PROCESS_OUTPUT_README.md       # Output 处理工具说明（新增）
     ├── output/                        # 输出文件夹
     │   ├── products.xlsx              # Excel产品数据
     │   ├── failed_list.json           # 失败项目列表（新增）
@@ -94,7 +105,26 @@ python product_scraper.py
 python product_scraper.py --retry-failed
 ```
 
-## 📋 失败重试功能
+## � Output 处理工具
+
+处理已爬取的 output 目录，包括图片格式转换和联系信息批量替换。
+
+### 快速使用
+```bash
+# macOS/Linux
+./run_process.sh
+
+# Windows
+run_process.bat
+```
+
+### 主要功能
+1. **WebP 转 JPG** - 自动转换所有 WebP 图片为 JPG 格式
+2. **联系信息替换** - 批量更新产品详情中的联系方式
+
+📖 **详细说明**: 查看 [PROCESS_OUTPUT_README.md](PROCESS_OUTPUT_README.md)
+
+## �📋 失败重试功能
 
 ### 失败记录
 爬虫会自动记录以下失败情况：
