@@ -11,6 +11,14 @@
 
 ## 最新改进 🎉
 
+### v2.2 更新 (2025-10-26)
+**新增图片尺寸调整工具** 🆕
+- `resize_images.py` - 智能调整图片尺寸
+  - 等比放大小于 750x750 的图片
+  - 使用高质量 LANCZOS 算法
+  - 自动添加 `big_` 前缀，原图保留
+  - 详见 [RESIZE_IMAGES_README.md](RESIZE_IMAGES_README.md)
+
 ### v2.1 更新 (2025-10-26)
 **新增 Output 处理工具** 🆕
 - `process_output.py` - 批量处理 output 目录
@@ -43,15 +51,19 @@ tools/                                  # 根目录
 ├── .gitignore                         # Git忽略文件（根目录）
 └── product_scraper/                   # 爬虫项目文件夹
     ├── product_scraper.py             # 爬虫脚本（增强反爬版本）
-    ├── process_output.py              # Output 处理工具（新增）
+    ├── process_output.py              # Output 处理工具
+    ├── resize_images.py               # 图片尺寸调整工具（新增）
     ├── config.json                    # 爬虫配置文件
     ├── run_scraper.sh                 # Linux/macOS运行脚本
     ├── run_scraper.bat                # Windows运行脚本
-    ├── run_process.sh                 # Linux/macOS 处理脚本（新增）
-    ├── run_process.bat                # Windows 处理脚本（新增）
+    ├── run_process.sh                 # Linux/macOS 处理脚本
+    ├── run_process.bat                # Windows 处理脚本
+    ├── run_resize.sh                  # Linux/macOS 调整脚本（新增）
+    ├── run_resize.bat                 # Windows 调整脚本（新增）
     ├── README.md                      # 使用说明
     ├── CHANGELOG.md                   # 更新日志
-    ├── PROCESS_OUTPUT_README.md       # Output 处理工具说明（新增）
+    ├── PROCESS_OUTPUT_README.md       # Output 处理工具说明
+    ├── RESIZE_IMAGES_README.md        # 图片调整工具说明（新增）
     ├── output/                        # 输出文件夹
     │   ├── products.xlsx              # Excel产品数据
     │   ├── failed_list.json           # 失败项目列表（新增）
@@ -105,7 +117,7 @@ python product_scraper.py
 python product_scraper.py --retry-failed
 ```
 
-## � Output 处理工具
+## 🔧 Output 处理工具
 
 处理已爬取的 output 目录，包括图片格式转换和联系信息批量替换。
 
@@ -124,7 +136,27 @@ run_process.bat
 
 📖 **详细说明**: 查看 [PROCESS_OUTPUT_README.md](PROCESS_OUTPUT_README.md)
 
-## �📋 失败重试功能
+## 📐 图片尺寸调整工具
+
+智能调整 output 目录中的图片尺寸，确保图片质量。
+
+### 快速使用
+```bash
+# macOS/Linux
+./run_resize.sh
+
+# Windows
+run_resize.bat
+```
+
+### 主要功能
+1. **智能筛选** - 只处理小于 750x750 的图片
+2. **等比放大** - 保持宽高比，使用高质量算法
+3. **安全处理** - 原图保留，添加 `big_` 前缀
+
+📖 **详细说明**: 查看 [RESIZE_IMAGES_README.md](RESIZE_IMAGES_README.md)
+
+## 📋 失败重试功能
 
 ### 失败记录
 爬虫会自动记录以下失败情况：
