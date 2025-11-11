@@ -70,3 +70,5 @@ coverage.xml
 
 # pytest
 .pytest_cache/
+
+excel_processor/output/
