@@ -1,0 +1,12 @@
+[package]
+name = "excel_column_checker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "检测 Excel 文件中未被系统识别的列名"
+
+[dependencies]
+calamine = "0.24"
+walkdir = "2.4"
+clap = { version = "4.4", features = ["derive"] }
+colored = "2.1"
