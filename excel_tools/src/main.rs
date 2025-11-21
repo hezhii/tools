@@ -1,24 +1,45 @@
-use calamine::{open_workbook, Reader, Xlsx};
-use clap::Parser;
+use calamine::{open_workbook, Reader, Xlsx, Xls, Data};
+use clap::{Parser, Subcommand};
 use colored::*;
+use rust_xlsxwriter::Workbook;
 use std::collections::{HashSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::fs;
 use walkdir::WalkDir;
 
-/// Excel 列名检查工具 - 检测未被系统识别的列名
+/// Excel 工具集 - 列名检查、格式转换等功能
 #[derive(Parser, Debug)]
-#[command(name = "excel_column_checker")]
+#[command(name = "excel_tools")]
 #[command(author = "Your Name")]
 #[command(version = "1.0")]
-#[command(about = "检测 Excel 文件中未被系统识别的列名", long_about = None)]
+#[command(about = "Excel 工具集：检测列名、转换格式", long_about = None)]
 struct Args {
-    /// 输入目录路径
-    #[arg(short, long)]
-    input: PathBuf,
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    /// 是否显示详细输出
-    #[arg(short, long, default_value_t = false)]
-    verbose: bool,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// 检测未被系统识别的列名
+    Check {
+        /// 输入目录路径
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// 是否显示详细输出
+        #[arg(short, long, default_value_t = false)]
+        verbose: bool,
+    },
+    /// 将 xls 文件转换为 xlsx 格式
+    Convert {
+        /// 输入目录路径
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// 输出目录路径
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 /// 系统识别的列名数组
@@ -229,6 +250,21 @@ fn find_excel_files(directory: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// 查找所有 xls 文件
+fn find_xls_files(directory: &Path) -> Vec<PathBuf> {
+    WalkDir::new(directory)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file() &&
+            e.path().extension().and_then(|s| s.to_str())
+                .map(|ext| ext == "xls")
+                .unwrap_or(false)
+        })
+        .map(|e| e.path().to_path_buf())
+        .collect()
+}
+
 /// 检测未被系统识别的列名
 fn check_unrecognized_columns(
     input_dir: &Path,
@@ -347,10 +383,153 @@ fn check_unrecognized_columns(
     Ok(())
 }
 
+/// 将 xls 文件转换为 xlsx 格式
+fn convert_xls_to_xlsx(
+    input_dir: &Path,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", "=".repeat(80).bright_blue());
+    println!("{}", "将 xls 文件转换为 xlsx 格式".bold().bright_blue());
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+
+    if !input_dir.exists() {
+        eprintln!("{} 输入目录不存在: {:?}", "❌ 错误:".red().bold(), input_dir);
+        std::process::exit(1);
+    }
+
+    // 创建输出目录
+    fs::create_dir_all(output_dir)?;
+
+    let xls_files = find_xls_files(input_dir);
+
+    if xls_files.is_empty() {
+        println!("{} 未找到任何 xls 文件在目录: {:?}", "❌".red(), input_dir);
+        return Ok(());
+    }
+
+    println!("✓ 找到 {} 个 xls 文件", xls_files.len());
+    println!("✓ 输出目录: {:?}\n", output_dir);
+
+    let mut success_count = 0;
+    let mut error_count = 0;
+
+    for (idx, file_path) in xls_files.iter().enumerate() {
+        let relative_path = file_path.strip_prefix(input_dir).unwrap_or(file_path);
+        print!("[{}/{}] 转换: ", idx + 1, xls_files.len());
+        println!("{}", relative_path.display().to_string().cyan());
+
+        // 构建输出文件路径，保持目录结构
+        let output_file = output_dir.join(relative_path).with_extension("xlsx");
+        
+        // 创建输出文件的父目录
+        if let Some(parent) = output_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        match convert_single_xls_file(file_path, &output_file) {
+            Ok(_) => {
+                println!("  {} 成功: {:?}", "✓".green(), output_file.strip_prefix(output_dir).unwrap_or(&output_file));
+                success_count += 1;
+            }
+            Err(e) => {
+                println!("  {} 失败: {}", "⚠️".yellow(), e);
+                error_count += 1;
+            }
+        }
+    }
+
+    // 输出统计结果
+    println!();
+    println!("{}", "=".repeat(80).bright_blue());
+    println!("{}", "转换结果统计".bold().bright_blue());
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+    println!("成功: {} 个文件", success_count.to_string().green().bold());
+    println!("失败: {} 个文件", error_count.to_string().yellow().bold());
+    println!("总计: {} 个文件", xls_files.len());
+    println!("\n输出目录: {:?}", output_dir);
+    println!();
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+
+    Ok(())
+}
+
+/// 转换单个 xls 文件为 xlsx
+fn convert_single_xls_file(
+    input_path: &Path,
+    output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 读取 xls 文件
+    let mut workbook: Xls<_> = open_workbook(input_path)?;
+    
+    // 创建新的 xlsx 工作簿
+    let mut new_workbook = Workbook::new();
+
+    // 获取所有工作表名称
+    let sheet_names = workbook.sheet_names().to_vec();
+
+    for sheet_name in sheet_names {
+        if let Ok(range) = workbook.worksheet_range(&sheet_name) {
+            // 在新工作簿中创建工作表
+            let worksheet = new_workbook.add_worksheet();
+            worksheet.set_name(&sheet_name)?;
+
+            // 逐行逐列写入数据
+            for (row_idx, row) in range.rows().enumerate() {
+                for (col_idx, cell) in row.iter().enumerate() {
+                    let row_num = row_idx as u32;
+                    let col_num = col_idx as u16;
+
+                    match cell {
+                        Data::Int(i) => {
+                            worksheet.write_number(row_num, col_num, *i as f64)?;
+                        }
+                        Data::Float(f) => {
+                            worksheet.write_number(row_num, col_num, *f)?;
+                        }
+                        Data::String(s) => {
+                            worksheet.write_string(row_num, col_num, s)?;
+                        }
+                        Data::Bool(b) => {
+                            worksheet.write_boolean(row_num, col_num, *b)?;
+                        }
+                        Data::DateTime(dt) => {
+                            // 尝试转换为字符串
+                            worksheet.write_string(row_num, col_num, &format!("{}", dt))?;
+                        }
+                        Data::Error(e) => {
+                            worksheet.write_string(row_num, col_num, &format!("ERROR: {:?}", e))?;
+                        }
+                        Data::Empty => {
+                            // 空单元格不需要写入
+                        }
+                        _ => {
+                            // 处理其他未预期的数据类型
+                            worksheet.write_string(row_num, col_num, &cell.to_string())?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 保存新的 xlsx 文件
+    new_workbook.save(output_path)?;
+
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
 
-    if let Err(e) = check_unrecognized_columns(&args.input, args.verbose) {
+    let result = match args.command {
+        Commands::Check { input, verbose } => check_unrecognized_columns(&input, verbose),
+        Commands::Convert { input, output } => convert_xls_to_xlsx(&input, &output),
+    };
+
+    if let Err(e) = result {
         eprintln!("{} {}", "错误:".red().bold(), e);
         std::process::exit(1);
     }

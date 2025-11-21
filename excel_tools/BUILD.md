@@ -1,6 +1,6 @@
 # 构建和打包指南
 
-本文档说明如何构建和打包 Excel Column Checker 命令行工具。
+本文档说明如何构建和打包 Excel Tools 命令行工具。
 
 ## 前置要求
 
@@ -29,22 +29,22 @@ cargo --version
 适合开发和调试，编译速度快但运行较慢：
 
 ```bash
-cd excel_column_checker
+cd excel_tools
 cargo build
 ```
 
-生成的可执行文件位于：`target/debug/excel_column_checker`
+生成的可执行文件位于：`target/debug/excel_tools`
 
 ### 发布版本（Release Build）
 
 适合实际使用，编译时间较长但运行速度最快：
 
 ```bash
-cd excel_column_checker
+cd excel_tools
 cargo build --release
 ```
 
-生成的可执行文件位于：`target/release/excel_column_checker`
+生成的可执行文件位于：`target/release/excel_tools`
 
 **推荐使用发布版本进行打包和部署。**
 
@@ -60,14 +60,14 @@ cargo build --release
 
 # 复制到用户本地 bin 目录
 mkdir -p ~/.local/bin
-cp target/release/excel_column_checker ~/.local/bin/
+cp target/release/excel_tools ~/.local/bin/
 
 # 确保 ~/.local/bin 在 PATH 中（添加到 ~/.zshrc 或 ~/.bashrc）
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
 # 测试
-excel_column_checker --version
+excel_tools --version
 ```
 
 #### 方法 2: 使用 cargo install
@@ -87,18 +87,18 @@ cargo install --path .
 cargo build --release
 
 # 创建发行目录
-mkdir -p dist/excel_column_checker
-cp target/release/excel_column_checker dist/excel_column_checker/
-cp README.md dist/excel_column_checker/
-cp BUILD.md dist/excel_column_checker/
+mkdir -p dist/excel_tools
+cp target/release/excel_tools dist/excel_tools/
+cp README.md dist/excel_tools/
+cp BUILD.md dist/excel_tools/
 
 # 打包
 cd dist
-tar -czf excel_column_checker-v1.0.0-$(uname -m)-$(uname -s).tar.gz excel_column_checker/
+tar -czf excel_tools-v1.0.0-$(uname -m)-$(uname -s).tar.gz excel_tools/
 
 # 生成的文件示例：
-# excel_column_checker-v1.0.0-arm64-Darwin.tar.gz  (macOS Apple Silicon)
-# excel_column_checker-v1.0.0-x86_64-Linux.tar.gz  (Linux x86_64)
+# excel_tools-v1.0.0-arm64-Darwin.tar.gz  (macOS Apple Silicon)
+# excel_tools-v1.0.0-x86_64-Linux.tar.gz  (Linux x86_64)
 ```
 
 ### Windows
@@ -109,7 +109,7 @@ tar -czf excel_column_checker-v1.0.0-$(uname -m)-$(uname -s).tar.gz excel_column
 # 构建发布版本
 cargo build --release
 
-# 可执行文件位于 target\release\excel_column_checker.exe
+# 可执行文件位于 target\release\excel_tools.exe
 # 将该目录添加到系统 PATH 或复制到已在 PATH 中的目录
 ```
 
@@ -120,13 +120,13 @@ cargo build --release
 cargo build --release
 
 # 创建发行目录
-mkdir dist\excel_column_checker
-copy target\release\excel_column_checker.exe dist\excel_column_checker\
-copy README.md dist\excel_column_checker\
-copy BUILD.md dist\excel_column_checker\
+mkdir dist\excel_tools
+copy target\release\excel_tools.exe dist\excel_tools\
+copy README.md dist\excel_tools\
+copy BUILD.md dist\excel_tools\
 
 # 使用 7-Zip 或其他工具打包为 zip
-# 生成：excel_column_checker-v1.0.0-x86_64-windows.zip
+# 生成：excel_tools-v1.0.0-x86_64-windows.zip
 ```
 
 ## 交叉编译
@@ -175,16 +175,16 @@ cargo build --release
 
 ```bash
 # 检查文件大小
-ls -lh target/release/excel_column_checker
+ls -lh target/release/excel_tools
 
 # 查看版本
-./target/release/excel_column_checker --version
+./target/release/excel_tools --version
 
 # 查看帮助
-./target/release/excel_column_checker --help
+./target/release/excel_tools --help
 
 # 简单测试
-./target/release/excel_column_checker --input ./test_data
+./target/release/excel_tools check --input ./test_data
 ```
 
 ## 依赖管理
@@ -249,13 +249,13 @@ jobs:
     - name: Package
       run: |
         mkdir dist
-        cp target/release/excel_column_checker* dist/
+        cp target/release/excel_tools* dist/
         cp README.md BUILD.md dist/
         
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
-        name: excel_column_checker-${{ matrix.os }}
+        name: excel_tools-${{ matrix.os }}
         path: dist/
 ```
 
@@ -287,10 +287,10 @@ cargo build --release
 echo $PATH
 
 # macOS/Linux
-which excel_column_checker
+which excel_tools
 
 # Windows
-where excel_column_checker
+where excel_tools
 ```
 
 ## 性能优化建议
