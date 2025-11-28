@@ -2,10 +2,20 @@ use calamine::{open_workbook, Reader, Xlsx, Xls, Data};
 use clap::{Parser, Subcommand};
 use colored::*;
 use rust_xlsxwriter::Workbook;
+use serde::Deserialize;
 use std::collections::{HashSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::fs;
 use walkdir::WalkDir;
+
+/// 问题文件 JSON 结构
+#[derive(Debug, Deserialize)]
+struct ProblemFiles {
+    /// 格式问题文件列表
+    file_format: Vec<String>,
+    /// 文件过大需要拆分的文件列表
+    file_size: Vec<String>,
+}
 
 /// Excel 工具集 - 列名检查、格式转换等功能
 #[derive(Parser, Debug)]
@@ -39,6 +49,20 @@ enum Commands {
         /// 输出目录路径
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// 处理问题文件：格式修复和大文件拆分
+    Fix {
+        /// 问题文件 JSON 文件路径
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// 输出目录路径
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// 拆分文件时每个文件的最大行数（默认60000）
+        #[arg(short, long, default_value_t = 60000)]
+        max_rows: usize,
     },
 }
 
@@ -521,12 +545,351 @@ fn convert_single_xls_file(
     Ok(())
 }
 
+/// 处理问题文件
+fn fix_problem_files(
+    input_json: &Path,
+    output_dir: &Path,
+    max_rows: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", "=".repeat(80).bright_blue());
+    println!("{}", "处理问题文件".bold().bright_blue());
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+
+    // 读取 JSON 文件
+    if !input_json.exists() {
+        eprintln!("{} JSON 文件不存在: {:?}", "❌ 错误:".red().bold(), input_json);
+        std::process::exit(1);
+    }
+
+    let json_content = fs::read_to_string(input_json)?;
+    let problem_files: ProblemFiles = serde_json::from_str(&json_content)?;
+
+    println!("✓ 读取问题文件列表成功");
+    println!("  - 格式问题文件: {} 个", problem_files.file_format.len());
+    println!("  - 需要拆分的文件: {} 个", problem_files.file_size.len());
+    println!();
+
+    // 创建输出目录
+    let format_output_dir = output_dir.join("file_format");
+    let size_output_dir = output_dir.join("file_size");
+    fs::create_dir_all(&format_output_dir)?;
+    fs::create_dir_all(&size_output_dir)?;
+
+    // 处理格式问题文件
+    println!("{}", "-".repeat(80).bright_cyan());
+    println!("{}", "处理格式问题文件 (另存为新格式)".bold().bright_cyan());
+    println!("{}", "-".repeat(80).bright_cyan());
+    println!();
+
+    let mut format_success = 0;
+    let mut format_error = 0;
+
+    for (idx, file_path_str) in problem_files.file_format.iter().enumerate() {
+        let file_path = Path::new(file_path_str);
+        let file_name = file_path.file_name().unwrap_or_default();
+        
+        print!("[{}/{}] 处理: ", idx + 1, problem_files.file_format.len());
+        println!("{}", file_name.to_string_lossy().cyan());
+
+        if !file_path.exists() {
+            println!("  {} 文件不存在，跳过", "⚠️".yellow());
+            format_error += 1;
+            continue;
+        }
+
+        let output_file = format_output_dir.join(file_name);
+
+        match resave_excel_file(file_path, &output_file) {
+            Ok(_) => {
+                println!("  {} 成功保存到: {:?}", "✓".green(), output_file.file_name().unwrap_or_default());
+                format_success += 1;
+            }
+            Err(e) => {
+                println!("  {} 处理失败: {}", "⚠️".yellow(), e);
+                format_error += 1;
+            }
+        }
+    }
+
+    println!();
+    println!("格式修复统计: 成功 {} 个, 失败 {} 个", 
+             format_success.to_string().green().bold(),
+             format_error.to_string().yellow().bold());
+    println!();
+
+    // 处理文件过大的文件
+    println!("{}", "-".repeat(80).bright_cyan());
+    println!("{}", format!("处理大文件 (每 {} 行拆分)", max_rows).bold().bright_cyan());
+    println!("{}", "-".repeat(80).bright_cyan());
+    println!();
+
+    let mut size_success = 0;
+    let mut size_error = 0;
+    let mut total_split_files = 0;
+
+    for (idx, file_path_str) in problem_files.file_size.iter().enumerate() {
+        let file_path = Path::new(file_path_str);
+        let file_name = file_path.file_name().unwrap_or_default();
+        
+        print!("[{}/{}] 拆分: ", idx + 1, problem_files.file_size.len());
+        println!("{}", file_name.to_string_lossy().cyan());
+
+        if !file_path.exists() {
+            println!("  {} 文件不存在，跳过", "⚠️".yellow());
+            size_error += 1;
+            continue;
+        }
+
+        match split_large_excel_file(file_path, &size_output_dir, max_rows) {
+            Ok(count) => {
+                println!("  {} 成功拆分为 {} 个文件", "✓".green(), count);
+                size_success += 1;
+                total_split_files += count;
+            }
+            Err(e) => {
+                println!("  {} 拆分失败: {}", "⚠️".yellow(), e);
+                size_error += 1;
+            }
+        }
+    }
+
+    println!();
+    println!("大文件拆分统计: 成功 {} 个源文件, 生成 {} 个拆分文件, 失败 {} 个",
+             size_success.to_string().green().bold(),
+             total_split_files.to_string().green().bold(),
+             size_error.to_string().yellow().bold());
+
+    // 输出总结
+    println!();
+    println!("{}", "=".repeat(80).bright_blue());
+    println!("{}", "处理完成".bold().bright_blue());
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+    println!("输出目录:");
+    println!("  - 格式修复文件: {:?}", format_output_dir);
+    println!("  - 拆分文件: {:?}", size_output_dir);
+    println!();
+    println!("{}", "=".repeat(80).bright_blue());
+    println!();
+
+    Ok(())
+}
+
+/// 另存 Excel 文件（解决格式问题）
+fn resave_excel_file(
+    input_path: &Path,
+    output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 根据文件扩展名选择读取方式
+    let extension = input_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    
+    let mut new_workbook = Workbook::new();
+
+    match extension.to_lowercase().as_str() {
+        "xlsx" | "xlsm" => {
+            let mut workbook: Xlsx<_> = open_workbook(input_path)?;
+            let sheet_names = workbook.sheet_names().to_vec();
+
+            for sheet_name in sheet_names {
+                if let Ok(range) = workbook.worksheet_range(&sheet_name) {
+                    let worksheet = new_workbook.add_worksheet();
+                    worksheet.set_name(&sheet_name)?;
+                    write_range_to_worksheet(&range, worksheet)?;
+                }
+            }
+        }
+        "xls" => {
+            let mut workbook: Xls<_> = open_workbook(input_path)?;
+            let sheet_names = workbook.sheet_names().to_vec();
+
+            for sheet_name in sheet_names {
+                if let Ok(range) = workbook.worksheet_range(&sheet_name) {
+                    let worksheet = new_workbook.add_worksheet();
+                    worksheet.set_name(&sheet_name)?;
+                    write_range_to_worksheet(&range, worksheet)?;
+                }
+            }
+        }
+        _ => {
+            return Err(format!("不支持的文件格式: {}", extension).into());
+        }
+    }
+
+    new_workbook.save(output_path)?;
+    Ok(())
+}
+
+/// 将数据范围写入工作表
+fn write_range_to_worksheet(
+    range: &calamine::Range<Data>,
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (row_idx, row) in range.rows().enumerate() {
+        for (col_idx, cell) in row.iter().enumerate() {
+            let row_num = row_idx as u32;
+            let col_num = col_idx as u16;
+
+            match cell {
+                Data::Int(i) => {
+                    worksheet.write_number(row_num, col_num, *i as f64)?;
+                }
+                Data::Float(f) => {
+                    worksheet.write_number(row_num, col_num, *f)?;
+                }
+                Data::String(s) => {
+                    worksheet.write_string(row_num, col_num, s)?;
+                }
+                Data::Bool(b) => {
+                    worksheet.write_boolean(row_num, col_num, *b)?;
+                }
+                Data::DateTime(dt) => {
+                    worksheet.write_string(row_num, col_num, &format!("{}", dt))?;
+                }
+                Data::Error(e) => {
+                    worksheet.write_string(row_num, col_num, &format!("ERROR: {:?}", e))?;
+                }
+                Data::Empty => {
+                    // 空单元格不需要写入
+                }
+                _ => {
+                    worksheet.write_string(row_num, col_num, &cell.to_string())?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 拆分大型 Excel 文件
+fn split_large_excel_file(
+    input_path: &Path,
+    output_dir: &Path,
+    max_rows: usize,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let extension = input_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let file_stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+
+    // 收集所有数据（包含表头）
+    let (headers, data_rows): (Vec<Data>, Vec<Vec<Data>>) = match extension.to_lowercase().as_str() {
+        "xlsx" | "xlsm" => {
+            let mut workbook: Xlsx<_> = open_workbook(input_path)?;
+            if let Some(Ok(range)) = workbook.worksheet_range_at(0) {
+                let mut rows_iter = range.rows();
+                let headers = rows_iter.next()
+                    .map(|row| row.to_vec())
+                    .unwrap_or_default();
+                let data_rows: Vec<Vec<Data>> = rows_iter
+                    .map(|row| row.to_vec())
+                    .collect();
+                (headers, data_rows)
+            } else {
+                return Err("无法读取工作表".into());
+            }
+        }
+        "xls" => {
+            let mut workbook: Xls<_> = open_workbook(input_path)?;
+            if let Some(Ok(range)) = workbook.worksheet_range_at(0) {
+                let mut rows_iter = range.rows();
+                let headers = rows_iter.next()
+                    .map(|row| row.to_vec())
+                    .unwrap_or_default();
+                let data_rows: Vec<Vec<Data>> = rows_iter
+                    .map(|row| row.to_vec())
+                    .collect();
+                (headers, data_rows)
+            } else {
+                return Err("无法读取工作表".into());
+            }
+        }
+        _ => {
+            return Err(format!("不支持的文件格式: {}", extension).into());
+        }
+    };
+
+    let total_data_rows = data_rows.len();
+    
+    if total_data_rows == 0 {
+        return Err("文件没有数据行".into());
+    }
+
+    // 计算需要拆分成多少个文件
+    let num_files = (total_data_rows + max_rows - 1) / max_rows;
+    
+    println!("  总数据行数: {}, 将拆分为 {} 个文件", total_data_rows, num_files);
+
+    for file_idx in 0..num_files {
+        let start_row = file_idx * max_rows;
+        let end_row = std::cmp::min(start_row + max_rows, total_data_rows);
+        
+        let output_file_name = format!("{}_split_{}.xlsx", file_stem, file_idx + 1);
+        let output_path = output_dir.join(&output_file_name);
+
+        let mut new_workbook = Workbook::new();
+        let worksheet = new_workbook.add_worksheet();
+
+        // 写入表头
+        for (col_idx, cell) in headers.iter().enumerate() {
+            write_cell_to_worksheet(worksheet, 0, col_idx as u16, cell)?;
+        }
+
+        // 写入数据行
+        for (row_offset, row) in data_rows[start_row..end_row].iter().enumerate() {
+            let row_num = (row_offset + 1) as u32; // +1 因为第0行是表头
+            for (col_idx, cell) in row.iter().enumerate() {
+                write_cell_to_worksheet(worksheet, row_num, col_idx as u16, cell)?;
+            }
+        }
+
+        new_workbook.save(&output_path)?;
+    }
+
+    Ok(num_files)
+}
+
+/// 将单元格数据写入工作表
+fn write_cell_to_worksheet(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    row: u32,
+    col: u16,
+    cell: &Data,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match cell {
+        Data::Int(i) => {
+            worksheet.write_number(row, col, *i as f64)?;
+        }
+        Data::Float(f) => {
+            worksheet.write_number(row, col, *f)?;
+        }
+        Data::String(s) => {
+            worksheet.write_string(row, col, s)?;
+        }
+        Data::Bool(b) => {
+            worksheet.write_boolean(row, col, *b)?;
+        }
+        Data::DateTime(dt) => {
+            worksheet.write_string(row, col, &format!("{}", dt))?;
+        }
+        Data::Error(e) => {
+            worksheet.write_string(row, col, &format!("ERROR: {:?}", e))?;
+        }
+        Data::Empty => {
+            // 空单元格不需要写入
+        }
+        _ => {
+            worksheet.write_string(row, col, &cell.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
 
     let result = match args.command {
         Commands::Check { input, verbose } => check_unrecognized_columns(&input, verbose),
         Commands::Convert { input, output } => convert_xls_to_xlsx(&input, &output),
+        Commands::Fix { input, output, max_rows } => fix_problem_files(&input, &output, max_rows),
     };
 
     if let Err(e) = result {
